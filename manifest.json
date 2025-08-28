@@ -1,0 +1,33 @@
+{
+  "manifest_version": 3,
+  "name": "UPFC Post Tracking Linkifier",
+  "version": "0.1.0",
+  "description": "UPFCページ内の11〜13桁の数字を日本郵便の追跡リンクに変換します。",
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "日本郵便 一括追跡を開く"
+  },
+  "permissions": ["tabs", "contextMenus", "scripting", "activeTab"],
+  "host_permissions": [
+    "https://www.upfc.jp/*"
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["shared/*.js"],
+      "matches": ["https://www.upfc.jp/*"]
+    }
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.upfc.jp/helloproject/mypage*",
+        "https://www.upfc.jp/m-line/mypage*"
+      ],
+      "js": ["content-script.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
