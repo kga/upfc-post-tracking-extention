@@ -8,7 +8,7 @@
 (function () {
   const DIGIT_MIN = 11;
   const DIGIT_MAX = 13;
-  const numberRe = new RegExp(
+  const digitRegex = new RegExp(
     `(?<!\\d)(\\d{${DIGIT_MIN},${DIGIT_MAX}})(?!\\d)`,
     "g"
   );
@@ -17,77 +17,77 @@
 
   async function ensureBuilder() {
     if (buildTrackingUrl) return buildTrackingUrl;
-    const mod = await import(chrome.runtime.getURL("shared/japanpost.js"));
-    buildTrackingUrl = (num) => mod.buildJapanPostUrl([String(num)]);
+    const module = await import(chrome.runtime.getURL("shared/japanpost.js"));
+    buildTrackingUrl = (number) => module.buildJapanPostUrl([String(number)]);
     return buildTrackingUrl;
   }
 
   function shouldSkipNode(node) {
     if (!node) return true;
     if (node.nodeType !== Node.TEXT_NODE) return true;
-    const parent = node.parentNode;
-    if (!parent) return true;
-    const tag = parent.tagName;
-    if (!tag) return true;
-    const forbidden = new Set(["A", "SCRIPT", "STYLE", "TEXTAREA"]);
-    if (forbidden.has(tag)) return true;
-    if (tag === "INPUT") return true;
+    const parentElement = node.parentNode;
+    if (!parentElement) return true;
+    const tagName = parentElement.tagName;
+    if (!tagName) return true;
+    const forbiddenTags = new Set(["A", "SCRIPT", "STYLE", "TEXTAREA"]);
+    if (forbiddenTags.has(tagName)) return true;
+    if (tagName === "INPUT") return true;
     // Avoid contentEditable areas
-    if (parent.isContentEditable) return true;
+    if (parentElement.isContentEditable) return true;
     return false;
   }
 
   function linkifyTextNode(textNode) {
     const text = textNode.nodeValue;
     if (!text) return;
-    if (!numberRe.test(text)) {
+    if (!digitRegex.test(text)) {
       // Reset lastIndex for next use since regex is global
-      numberRe.lastIndex = 0;
+      digitRegex.lastIndex = 0;
       return;
     }
-    numberRe.lastIndex = 0;
+    digitRegex.lastIndex = 0;
 
-    const frag = document.createDocumentFragment();
+    const fragment = document.createDocumentFragment();
     let lastIndex = 0;
     let match;
-    while ((match = numberRe.exec(text)) !== null) {
-      const [full, digits] = match;
-      const start = match.index;
-      const end = start + full.length;
-      if (start > lastIndex) {
-        frag.appendChild(document.createTextNode(text.slice(lastIndex, start)));
+    while ((match = digitRegex.exec(text)) !== null) {
+      const [fullMatch, digits] = match;
+      const startIndex = match.index;
+      const endIndex = startIndex + fullMatch.length;
+      if (startIndex > lastIndex) {
+        fragment.appendChild(document.createTextNode(text.slice(lastIndex, startIndex)));
       }
-      const a = document.createElement("a");
-      a.href = buildTrackingUrl(digits);
-      a.textContent = digits;
-      a.target = "_blank";
-      a.rel = "noopener noreferrer";
-      a.dataset.upfcPostTracking = "1";
-      frag.appendChild(a);
-      lastIndex = end;
+      const anchor = document.createElement("a");
+      anchor.href = buildTrackingUrl(digits);
+      anchor.textContent = digits;
+      anchor.target = "_blank";
+      anchor.rel = "noopener noreferrer";
+      anchor.dataset.upfcPostTracking = "1";
+      fragment.appendChild(anchor);
+      lastIndex = endIndex;
     }
 
     if (lastIndex < text.length) {
-      frag.appendChild(document.createTextNode(text.slice(lastIndex)));
+      fragment.appendChild(document.createTextNode(text.slice(lastIndex)));
     }
 
-    if (frag.childNodes.length) {
-      textNode.parentNode.replaceChild(frag, textNode);
+    if (fragment.childNodes.length) {
+      textNode.parentNode.replaceChild(fragment, textNode);
     }
   }
 
-  function walkAndLinkify(root) {
-    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+  function walkAndLinkify(rootElement) {
+    const walker = document.createTreeWalker(rootElement, NodeFilter.SHOW_TEXT, {
       acceptNode(node) {
         return shouldSkipNode(node)
           ? NodeFilter.FILTER_REJECT
           : NodeFilter.FILTER_ACCEPT;
       },
     });
-    const nodes = [];
-    let n;
-    while ((n = walker.nextNode())) nodes.push(n);
-    nodes.forEach(linkifyTextNode);
+    const textNodes = [];
+    let node;
+    while ((node = walker.nextNode())) textNodes.push(node);
+    textNodes.forEach(linkifyTextNode);
   }
 
   async function init() {

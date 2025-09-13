@@ -1,5 +1,7 @@
 // Background service worker: builds a combined Japan Post tracking URL and opens it
 import { buildJapanPostUrl } from "./shared/japanpost.js";
+import { isTargetUrl } from "./shared/utils.js";
+import { TRACKING_NUMBER, BADGE } from "./shared/constants.js";
 
 async function getNumbersFromPage(tabId) {
   try {
@@ -12,52 +14,52 @@ async function getNumbersFromPage(tabId) {
           `(?<!\\d)(\\d{${DIGIT_MIN},${DIGIT_MAX}})(?!\\d)`,
           "g"
         );
-        const seen = new Set();
-        const out = [];
+        const seenNumbers = new Set();
+        const foundNumbers = [];
 
         // 1) まず拡張が生成したリンクから収集（data-upfc-post-tracking="1"）
         document
           .querySelectorAll('a[data-upfc-post-tracking="1"]')
-          .forEach((a) => {
-            const t = (a.textContent || "").trim();
-            if (t && /^\d{11,13}$/.test(t) && !seen.has(t)) {
-              seen.add(t);
-              out.push(t);
+          .forEach((anchor) => {
+            const text = (anchor.textContent || "").trim();
+            if (text && /^\d{11,13}$/.test(text) && !seenNumbers.has(text)) {
+              seenNumbers.add(text);
+              foundNumbers.push(text);
             }
           });
 
         // 2) 見つからない/不足する場合、テキストノードを走査
-        if (out.length < 10) {
+        if (foundNumbers.length < 10) {
           const walker = document.createTreeWalker(
             document.body,
             NodeFilter.SHOW_TEXT
           );
           let node;
           while ((node = walker.nextNode())) {
-            const p = node.parentNode;
+            const parentElement = node.parentNode;
             if (
-              !p ||
+              !parentElement ||
               ["A", "SCRIPT", "STYLE", "TEXTAREA", "INPUT"].includes(
-                p.tagName
+                parentElement.tagName
               ) ||
-              p.isContentEditable
+              parentElement.isContentEditable
             )
               continue;
             const text = node.nodeValue || "";
-            let m;
+            let match;
             re.lastIndex = 0;
-            while ((m = re.exec(text))) {
-              const digits = m[1];
-              if (!seen.has(digits)) {
-                seen.add(digits);
-                out.push(digits);
-                if (out.length >= 10) break;
+            while ((match = re.exec(text))) {
+              const digits = match[1];
+              if (!seenNumbers.has(digits)) {
+                seenNumbers.add(digits);
+                foundNumbers.push(digits);
+                if (foundNumbers.length >= TRACKING_NUMBER.MAX_BATCH_SIZE) break;
               }
             }
-            if (out.length >= 10) break;
+            if (foundNumbers.length >= 10) break;
           }
         }
-        return out;
+        return foundNumbers;
       },
     });
     return result || [];
@@ -69,18 +71,18 @@ async function getNumbersFromPage(tabId) {
 
 async function openCombinedTracking(tab) {
   try {
-    const nums = await getNumbersFromPage(tab.id);
-    console.log("[UPFC] numbers found:", nums.length, nums);
-    if (!nums.length) {
+    const trackingNumbers = await getNumbersFromPage(tab.id);
+    console.log("[UPFC] numbers found:", trackingNumbers.length, trackingNumbers);
+    if (!trackingNumbers.length) {
       await chrome.action.setBadgeText({ text: "0", tabId: tab.id });
-      await chrome.action.setBadgeBackgroundColor({ color: "#777" });
+      await chrome.action.setBadgeBackgroundColor({ color: BADGE.COLOR_INACTIVE });
       setTimeout(
         () => chrome.action.setBadgeText({ text: "", tabId: tab.id }),
-        2500
+        BADGE.TIMEOUT_MS
       );
       return;
     }
-    const url = buildJapanPostUrl(nums);
+    const url = buildJapanPostUrl(trackingNumbers);
     console.log("[UPFC] opening URL:", url);
     await chrome.tabs.create({ url });
   } catch (e) {
@@ -91,11 +93,7 @@ async function openCombinedTracking(tab) {
 chrome.action.onClicked.addListener((tab) => {
   if (!tab?.id) return;
   // Only act on target domain
-  if (
-    !/^(https:\/\/www\.upfc\.jp\/helloproject\/mypage|https:\/\/www\.upfc\.jp\/m-line\/mypage)/.test(
-      tab.url || ""
-    )
-  ) {
+  if (!isTargetUrl(tab.url)) {
     console.log("[UPFC] click ignored: URL not matched", tab.url);
     return;
   }
@@ -113,12 +111,7 @@ chrome.runtime.onInstalled.addListener(() => {
 
 chrome.contextMenus.onClicked.addListener((info, tab) => {
   if (info.menuItemId === "openCombinedTracking" && tab?.id) {
-    if (
-      !/^(https:\/\/www\.upfc\.jp\/helloproject\/mypage|https:\/\/www\.upfc\.jp\/m-line\/mypage)/.test(
-        tab.url || ""
-      )
-    )
-      return;
+    if (!isTargetUrl(tab.url)) return;
     openCombinedTracking(tab);
   }
 });
